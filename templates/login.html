@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Log in · Accessible Banking{% endblock %}
+{% block content %}<section class="form-shell"><div class="form-heading"><p class="eyebrow">WELCOME BACK</p><h1>Log in to your demo</h1><p>Use the username and password you created for this prototype.</p></div>
+<form method="post" class="form-card"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+<label>Username<input name="username" autocomplete="username" required autofocus></label>
+<label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+<button class="button primary full-button" type="submit">Log in securely</button>
+<p class="form-bottom"><a href="{{ url_for('forgot') }}">Forgot password?</a></p>
+</form><p class="form-bottom outside">New here? <a href="{{ url_for('register') }}">Create a demo account</a></p></section>{% endblock %}

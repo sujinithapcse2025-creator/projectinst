@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Recover password · Accessible Banking{% endblock %}
+{% block content %}<section class="form-shell"><div class="form-heading"><p class="eyebrow">ACCOUNT RECOVERY</p><h1>Verify your details</h1><p>Answer the security question you selected at registration. This is a demo-only recovery method.</p></div>
+<form method="post" class="form-card"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+<label>Username<input name="username" required autocomplete="username"></label>
+<label>Security question<select name="security_question" required><option value="">Choose the question you registered</option>{% for q in questions %}<option value="{{ q }}">{{ q }}</option>{% endfor %}</select></label>
+<label>Security answer<input name="security_answer" required autocomplete="off"></label>
+<button class="button primary full-button" type="submit">Verify and continue</button></form><p class="form-bottom outside"><a href="{{ url_for('login') }}">Return to log in</a></p></section>{% endblock %}

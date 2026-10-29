@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="{{ 'ta' if preferences.language.startswith('தமிழ்') else ('hi' if preferences.language.startswith('हिन्दी') else 'en') }}">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d4f4b">
+  <title>{% block title %}Accessible Banking Companion{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>:root{--user-font:{{ preferences.font_size }}px}{% if preferences.high_contrast %}--page:#000;--surface:#111;--ink:#fff;--muted:#eee;--line:#fff;--brand:#ff0;--brand-dark:#ff0;--brand-ink:#000;{% endif %}</style>
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body class="{% if preferences.high_contrast %}high-contrast{% endif %}" data-voice="{{ 'on' if preferences.voice_enabled else 'off' }}" data-language="{{ preferences.language }}">
+<a class="skip-link" href="#main">Skip to main content</a>
+<div class="prototype-strip" role="note">{{ demo_warning }}</div>
+<header class="site-header">
+  <a class="brand" href="{{ url_for('index') }}" aria-label="Accessible Banking Companion home"><img class="brand-logo" src="{{ url_for('static', filename='images/logo.svg') }}" alt=""><span><strong>Accessible Banking</strong><small>Companion</small></span></a>
+  <nav aria-label="Main navigation">
+    <a href="{{ url_for('fraud') }}">Safety Centre</a>
+    {% if active_user %}
+      <a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('settings') }}">Accessibility</a>
+      <form class="nav-form" method="post" action="{{ url_for('logout') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="nav-logout" type="submit">Log out</button></form>
+    {% else %}
+      <a href="{{ url_for('login') }}">Log in</a><a class="nav-cta" href="{{ url_for('register') }}">Create account</a>
+    {% endif %}
+  </nav>
+</header>
+<main id="main" class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}<section class="flash-stack" aria-live="polite">{% for category, message in messages %}<div class="flash {{ category }}" role="status">{{ message }}</div>{% endfor %}</section>{% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="site-footer"><p><strong>INNOVEX · Dexathon 2026</strong></p><p>Designed to explore safer, simpler and more accessible banking for older adults and people with disabilities.</p><p class="footer-warning">Prototype only. Do not enter real banking credentials. No bank is connected and no payments are made.</p></footer>
+</body></html>

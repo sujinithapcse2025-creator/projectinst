@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Create account · Accessible Banking{% endblock %}
+{% block content %}
+<section class="form-shell wide-form"><div class="form-heading"><p class="eyebrow">STEP 1 · DEMO PROFILE</p><h1>Create your account</h1><p>Use fictional details for your demonstration. Do not use your real bank password or account number.</p></div>
+<form method="post" class="form-card">
+<input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+<div class="form-grid">
+<label>Full name<input name="fullname" autocomplete="name" required minlength="3" maxlength="80" placeholder="e.g. Meena Kumar"></label>
+<label>Date of birth<input name="dob" type="date" max="2026-10-29"></label>
+<label>Mobile number (India)<input name="mobile" inputmode="numeric" pattern="[6-9][0-9]{9}" maxlength="10" required placeholder="10-digit demo number"></label>
+<label>Email address<input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+<label>Username<input name="username" autocomplete="username" pattern="[A-Za-z0-9_.]{4,20}" minlength="4" maxlength="20" required></label>
+<label>Preferred language<select name="language">{% for lang in languages %}<option value="{{ lang }}">{{ lang }}</option>{% endfor %}</select></label>
+</div>
+<fieldset><legend>What accessibility support would you like?</legend><div class="check-grid">{% for option in access_options %}<label class="check-option"><input type="checkbox" name="accessibility" value="{{ option }}"><span>{{ option }}</span></label>{% endfor %}</div></fieldset>
+<div class="form-grid">
+<label>Password<input name="password" type="password" autocomplete="new-password" required minlength="8" aria-describedby="password-help"><small id="password-help">At least 8 characters, including uppercase, lowercase, number and symbol.</small></label>
+<label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required minlength="8"></label>
+<label class="full-span">Security question<select name="security_question" required><option value="">Choose a question</option>{% for question in questions %}<option value="{{ question }}">{{ question }}</option>{% endfor %}</select><small>This is a simple prototype recovery method, not strong identity verification.</small></label>
+<label class="full-span">Security answer<input name="security_answer" required minlength="2" maxlength="120" autocomplete="off"><small>Use a fictional answer for your demo. It is stored as a password hash.</small></label>
+</div>
+<div class="simulation-box"><strong>Simulated accessibility verification</strong><p>Fingerprint, face and voice recognition are not actually performed by this web app.</p><label class="check-option"><input type="checkbox" name="demo_biometrics_ack" value="yes" required><span>I understand that any biometric/voice verification shown in this prototype is simulated only.</span></label></div>
+<button class="button primary full-button" type="submit">Create demo account</button>
+<p class="form-bottom">Already registered? <a href="{{ url_for('login') }}">Log in</a></p>
+</form></section>{% endblock %}

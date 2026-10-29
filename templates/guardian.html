@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Trusted person · Accessible Banking{% endblock %}
+{% block content %}<section class="form-shell"><div class="form-heading"><p class="eyebrow">SUPPORT NETWORK</p><h1>Trusted person details</h1><p>Add someone you trust, such as a family member, friend or caregiver. The app will not contact them.</p></div>
+<form method="post" class="form-card"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><label>Full name<input name="guardian_name" required minlength="2" maxlength="80" value="{{ guardian.guardian_name if guardian else '' }}"></label>
+<label>Relationship<select name="relationship" required>{% for rel in ['Family member','Friend','Caregiver','Other'] %}<option {% if guardian and guardian.relationship == rel %}selected{% endif %}>{{ rel }}</option>{% endfor %}</select></label>
+<label>Mobile number (India)<input name="contact" inputmode="numeric" pattern="[6-9][0-9]{9}" maxlength="10" required value="{{ guardian.contact if guardian else '' }}"><small>This is stored in the local prototype database. Use fictional information when presenting.</small></label>
+<button class="button primary full-button" type="submit">Save trusted person</button></form><p class="form-bottom outside"><a href="{{ url_for('dashboard') }}">← Return to dashboard</a></p></section>{% endblock %}

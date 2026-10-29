@@ -1,0 +1,1216 @@
+"""
+Accessible Banking Companion  (Python + Streamlit + SQLite + bcrypt)
+INNOVEX | Dexathon 2026
+
+Prototype Demonstration Only. No Real Banking Transactions Are Performed.
+
+Run:
+    pip install streamlit bcrypt pandas pyttsx3 SpeechRecognition
+    streamlit run app.py
+
+Notes
+- pyttsx3 speaks on the machine running the server (great for a laptop demo).
+  If it is not available (or the language is Tamil/Hindi) the app falls back
+  to the browser's built-in speech synthesis.
+- Voice commands use st.audio_input (Streamlit >= 1.39) + SpeechRecognition
+  (Google Web Speech, needs internet). A text box is always provided too.
+"""
+
+import datetime as dt
+import json
+import os
+import re
+import sqlite3
+import threading
+import time
+
+import bcrypt
+import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
+
+try:
+    import pyttsx3
+except Exception:  # pragma: no cover
+    pyttsx3 = None
+
+try:
+    import speech_recognition as sr
+except Exception:  # pragma: no cover
+    sr = None
+
+# --------------------------------------------------------------------------
+# CONFIG
+# --------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Accessible Banking Companion",
+    page_icon="🏦",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
+
+DB_PATH = "banking_companion.db"
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+MAX_LOGIN_ATTEMPTS = 3
+MAX_KBA_ATTEMPTS = 3
+LOCK_MINUTES = 15
+SESSION_TIMEOUT_MIN = 10
+PROTOTYPE_WARNING = "Prototype Demonstration Only. No Real Banking Transactions Are Performed."
+
+LANGS = {"English": "en-IN", "தமிழ் (Tamil)": "ta-IN", "हिन्दी (Hindi)": "hi-IN"}
+LANG_CODE_BY_KEY = {"en": "en-IN", "ta": "ta-IN", "hi": "hi-IN"}
+
+SECURITY_QUESTIONS = [
+    "What is your favorite teacher's name?",
+    "What is your first school name?",
+    "What is your favorite city?",
+]
+
+ACCESS_OPTIONS = [
+    "Visual impairment or blindness",
+    "Hearing impairment",
+    "Mobility impairment",
+    "Cognitive or learning difficulties",
+    "Elderly user needing additional assistance",
+    "Other accessibility needs",
+    "Prefer not to disclose",
+]
+
+BANKS = ["State Bank of India", "Indian Bank", "Canara Bank", "HDFC Bank",
+         "ICICI Bank", "Axis Bank", "Bank of Baroda", "Union Bank of India"]
+
+# --------------------------------------------------------------------------
+# TRANSLATIONS  (falls back to English for any missing key)
+# --------------------------------------------------------------------------
+T = {
+    "en": {
+        "app": "Accessible Banking Companion",
+        "welcome": "Welcome! Banking made simple, safe and independent for everyone.",
+        "start": "Get Started",
+        "login_existing": "I already have an account",
+        "choose_lang": "Choose your language",
+        "access_title": "Which support would you like?",
+        "continue": "Continue",
+        "back": "Back",
+        "login": "Login",
+        "username": "Username",
+        "password": "Password",
+        "wrong": "Incorrect username or password. Please try again.",
+        "attempts_left": "Attempts remaining",
+        "forgot": "Forgot password?",
+        "kba_title": "Security Question Check",
+        "kba_intro": "Too many failed attempts. Please answer your security question.",
+        "kba_answer": "Your answer",
+        "kba_wrong": "That answer is not correct.",
+        "verify_btn": "Verify Answer",
+        "reverify_title": "Confirm it is really you",
+        "reverify_intro": "Complete all three checks to continue.",
+        "reset_title": "Create a New Password",
+        "new_pw": "New password",
+        "confirm_pw": "Confirm new password",
+        "reset_btn": "Reset Password",
+        "reset_ok": "Password changed successfully. Please login with your new password.",
+        "locked": "Too many attempts. Account locked for a short time. Please try again later.",
+        "logout": "Logout",
+        "dashboard": "Dashboard",
+        "balance": "Available Balance",
+        "recent": "Recent Transactions",
+        "read_page": "🔊 Read this page aloud",
+    },
+    "ta": {
+        "app": "அணுகக்கூடிய வங்கி துணை",
+        "welcome": "வரவேற்கிறோம்! வங்கிச் சேவை எளிமையாகவும் பாதுகாப்பாகவும்.",
+        "start": "தொடங்கவும்",
+        "login_existing": "எனக்கு ஏற்கனவே கணக்கு உள்ளது",
+        "choose_lang": "உங்கள் மொழியைத் தேர்ந்தெடுக்கவும்",
+        "access_title": "உங்களுக்கு எந்த உதவி தேவை?",
+        "continue": "தொடரவும்",
+        "back": "பின்செல்",
+        "login": "உள்நுழைய",
+        "username": "பயனர்பெயர்",
+        "password": "கடவுச்சொல்",
+        "wrong": "பயனர்பெயர் அல்லது கடவுச்சொல் தவறு. மீண்டும் முயற்சிக்கவும்.",
+        "attempts_left": "மீதமுள்ள முயற்சிகள்",
+        "forgot": "கடவுச்சொல் மறந்துவிட்டதா?",
+        "kba_title": "பாதுகாப்பு கேள்வி சரிபார்ப்பு",
+        "kba_intro": "பல தவறான முயற்சிகள். உங்கள் பாதுகாப்பு கேள்விக்கு பதிலளிக்கவும்.",
+        "kba_answer": "உங்கள் பதில்",
+        "kba_wrong": "பதில் சரியில்லை.",
+        "verify_btn": "பதிலைச் சரிபார்",
+        "reverify_title": "நீங்கள்தான் என்று உறுதிப்படுத்தவும்",
+        "reverify_intro": "தொடர மூன்று சோதனைகளையும் முடிக்கவும்.",
+        "reset_title": "புதிய கடவுச்சொல்லை உருவாக்கவும்",
+        "new_pw": "புதிய கடவுச்சொல்",
+        "confirm_pw": "புதிய கடவுச்சொல்லை உறுதிசெய்",
+        "reset_btn": "கடவுச்சொல்லை மாற்று",
+        "reset_ok": "கடவுச்சொல் மாற்றப்பட்டது. புதிய கடவுச்சொல்லுடன் உள்நுழையவும்.",
+        "locked": "அதிக முயற்சிகள். கணக்கு சிறிது நேரம் பூட்டப்பட்டுள்ளது.",
+        "logout": "வெளியேறு",
+        "dashboard": "முகப்புப் பலகை",
+        "balance": "கிடைக்கும் இருப்பு",
+        "recent": "சமீபத்திய பரிவர்த்தனைகள்",
+        "read_page": "🔊 இந்தப் பக்கத்தை படிக்கவும்",
+    },
+    "hi": {
+        "app": "सुलभ बैंकिंग साथी",
+        "welcome": "स्वागत है! बैंकिंग अब सरल, सुरक्षित और स्वतंत्र।",
+        "start": "शुरू करें",
+        "login_existing": "मेरे पास पहले से खाता है",
+        "choose_lang": "अपनी भाषा चुनें",
+        "access_title": "आपको कौन सी सहायता चाहिए?",
+        "continue": "आगे बढ़ें",
+        "back": "वापस",
+        "login": "लॉगिन",
+        "username": "यूज़रनेम",
+        "password": "पासवर्ड",
+        "wrong": "यूज़रनेम या पासवर्ड गलत है। कृपया फिर प्रयास करें।",
+        "attempts_left": "शेष प्रयास",
+        "forgot": "पासवर्ड भूल गए?",
+        "kba_title": "सुरक्षा प्रश्न जाँच",
+        "kba_intro": "बहुत अधिक गलत प्रयास। कृपया अपने सुरक्षा प्रश्न का उत्तर दें।",
+        "kba_answer": "आपका उत्तर",
+        "kba_wrong": "उत्तर सही नहीं है।",
+        "verify_btn": "उत्तर जाँचें",
+        "reverify_title": "पुष्टि करें कि यह आप ही हैं",
+        "reverify_intro": "आगे बढ़ने के लिए तीनों जाँच पूरी करें।",
+        "reset_title": "नया पासवर्ड बनाएँ",
+        "new_pw": "नया पासवर्ड",
+        "confirm_pw": "नया पासवर्ड दोबारा लिखें",
+        "reset_btn": "पासवर्ड रीसेट करें",
+        "reset_ok": "पासवर्ड बदल गया। कृपया नए पासवर्ड से लॉगिन करें।",
+        "locked": "बहुत अधिक प्रयास। खाता कुछ समय के लिए लॉक है।",
+        "logout": "लॉगआउट",
+        "dashboard": "डैशबोर्ड",
+        "balance": "उपलब्ध शेष राशि",
+        "recent": "हाल के लेन-देन",
+        "read_page": "🔊 यह पेज पढ़कर सुनाएँ",
+    },
+}
+
+
+def t(key: str) -> str:
+    lang = st.session_state.get("lang_key", "en")
+    return T.get(lang, {}).get(key) or T["en"].get(key, key)
+
+
+# --------------------------------------------------------------------------
+# DATABASE
+# --------------------------------------------------------------------------
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    with get_conn() as c:
+        c.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fullname TEXT NOT NULL,
+                dob TEXT,
+                mobile TEXT,
+                email TEXT,
+                language TEXT,
+                accessibility TEXT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT,
+                bank_name TEXT
+            );
+            CREATE TABLE IF NOT EXISTS guardian (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                guardian_name TEXT,
+                relationship TEXT,
+                contact TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS verification (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                fingerprint_registered INTEGER DEFAULT 0,
+                voice_registered INTEGER DEFAULT 0,
+                face_registered INTEGER DEFAULT 0,
+                face_image_path TEXT,
+                security_question TEXT,
+                security_answer_hash TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            """
+        )
+
+
+def hash_text(text: str) -> str:
+    return bcrypt.hashpw(text.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def check_hash(text: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(text.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def normalize_answer(ans: str) -> str:
+    return re.sub(r"\s+", " ", ans.strip().lower())
+
+
+def get_user(username: str):
+    with get_conn() as c:
+        return c.execute("SELECT * FROM users WHERE username = ?", (username.strip(),)).fetchone()
+
+
+def get_verification(user_id: int):
+    with get_conn() as c:
+        return c.execute("SELECT * FROM verification WHERE user_id = ?", (user_id,)).fetchone()
+
+
+def is_locked(user) -> bool:
+    if not user or not user["locked_until"]:
+        return False
+    try:
+        return dt.datetime.fromisoformat(user["locked_until"]) > dt.datetime.now()
+    except ValueError:
+        return False
+
+
+def set_failed_attempts(user_id: int, n: int) -> None:
+    with get_conn() as c:
+        c.execute("UPDATE users SET failed_attempts = ? WHERE id = ?", (n, user_id))
+
+
+def lock_user(user_id: int) -> None:
+    until = (dt.datetime.now() + dt.timedelta(minutes=LOCK_MINUTES)).isoformat()
+    with get_conn() as c:
+        c.execute("UPDATE users SET locked_until = ? WHERE id = ?", (until, user_id))
+
+
+# --------------------------------------------------------------------------
+# SESSION STATE
+# --------------------------------------------------------------------------
+DEFAULTS = {
+    "page": "welcome",
+    "lang_name": "English",
+    "lang_key": "en",
+    "access": [],
+    "font_px": 18,
+    "high_contrast": False,
+    "voice_on": True,
+    "logged_in": False,
+    "user_id": None,
+    "username": None,
+    "last_active": time.time(),
+    # verification (registration)
+    "ver": {"fp": False, "voice": False, "face": False, "face_path": None,
+            "question": None, "answer_hash": None},
+    "ver_step": 1,
+    "cam_key": 0,
+    # login / recovery
+    "anon_fail": 0,
+    "recovery_user": None,
+    "kba_fail": 0,
+    "kba_ok": False,
+    "re_fp": False,
+    "re_voice": False,
+    "re_face": False,
+    "flash": None,
+    "assistant_log": [],
+}
+
+
+def init_state() -> None:
+    for k, v in DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = json.loads(json.dumps(v)) if isinstance(v, (dict, list)) else v
+
+
+def go(page: str) -> None:
+    st.session_state.page = page
+    st.rerun()
+
+
+def logout() -> None:
+    for k in ("logged_in", "user_id", "username"):
+        st.session_state[k] = DEFAULTS[k]
+    go("login")
+
+
+def reset_recovery_state() -> None:
+    for k in ("recovery_user", "kba_fail", "kba_ok", "re_fp", "re_voice", "re_face"):
+        st.session_state[k] = DEFAULTS[k]
+
+
+# --------------------------------------------------------------------------
+# TEXT TO SPEECH  (pyttsx3 first, browser speech as fallback)
+# --------------------------------------------------------------------------
+def _pyttsx_say(text: str) -> None:
+    try:
+        engine = pyttsx3.init()
+        engine.setProperty("rate", 150)
+        engine.say(text)
+        engine.runAndWait()
+    except Exception:
+        pass
+
+
+def _browser_say(text: str, lang_code: str) -> None:
+    components.html(
+        f"""<script>
+        const u = new SpeechSynthesisUtterance({json.dumps(text)});
+        u.lang = {json.dumps(lang_code)}; u.rate = 0.9;
+        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+        </script>""",
+        height=0,
+    )
+
+
+def speak(text: str, force: bool = False) -> None:
+    """Reusable text-to-speech helper."""
+    if not (st.session_state.voice_on or force):
+        return
+    code = LANG_CODE_BY_KEY.get(st.session_state.lang_key, "en-IN")
+    if pyttsx3 and code == "en-IN":
+        threading.Thread(target=_pyttsx_say, args=(text,), daemon=True).start()
+    else:
+        _browser_say(text, code)
+
+
+def read_aloud_button(text: str, key: str) -> None:
+    if st.button(t("read_page"), key=key):
+        speak(text, force=True)
+
+
+# --------------------------------------------------------------------------
+# STYLING
+# --------------------------------------------------------------------------
+def inject_css() -> None:
+    fs = st.session_state.font_px
+    if st.session_state.high_contrast:
+        bg, fg, card, primary, border = "#000000", "#FFFFFF", "#111111", "#FFD400", "#FFFFFF"
+        btn_fg = "#000000"
+    else:
+        bg, fg, card, primary, border = "#F4F8FD", "#0B1F3A", "#FFFFFF", "#0B5ED7", "#C9D9EE"
+        btn_fg = "#FFFFFF"
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{ background: {bg}; color: {fg}; }}
+        html, body, [class*="css"], .stMarkdown, p, label, li, span {{
+            font-size: {fs}px !important; color: {fg};
+        }}
+        h1 {{ font-size: {fs * 2}px !important; }}
+        h2 {{ font-size: {int(fs * 1.6)}px !important; }}
+        h3 {{ font-size: {int(fs * 1.3)}px !important; }}
+        .stButton > button {{
+            width: 100%; min-height: 3.4rem; border-radius: 14px;
+            background: {primary}; color: {btn_fg} !important; border: 2px solid {border};
+            font-weight: 700; transition: transform .15s ease, box-shadow .15s ease;
+        }}
+        .stButton > button:hover {{ transform: translateY(-2px); box-shadow: 0 6px 16px rgba(11,94,215,.3); }}
+        .stButton > button:focus-visible, input:focus-visible {{ outline: 4px solid #FFB000 !important; }}
+        .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea {{
+            min-height: 3rem; border: 2px solid {border}; border-radius: 10px;
+        }}
+        .abc-card {{ background: {card}; border: 2px solid {border}; border-radius: 18px;
+                     padding: 1.1rem 1.3rem; margin: .6rem 0; animation: fadeIn .5s ease; }}
+        .abc-success {{ border-left: 10px solid #1B9E4B; }}
+        .abc-warning {{ border-left: 10px solid #F5A400; }}
+        .abc-error   {{ border-left: 10px solid #D32F2F; }}
+        .abc-banner {{ background:#FFF3CD; color:#4D3B00 !important; border:2px solid #F5A400;
+                      border-radius:10px; padding:.5rem .8rem; text-align:center;
+                      font-weight:700; margin-bottom:.8rem; }}
+        .abc-banner * {{ color:#4D3B00 !important; }}
+        .abc-logo {{ font-size: 4rem; text-align:center; }}
+        .abc-balance {{ font-size: {fs * 2.2}px; font-weight: 800; color: #1B9E4B; }}
+        @keyframes fadeIn {{ from {{opacity:0; transform: translateY(8px);}} to {{opacity:1; transform:none;}} }}
+        @media (max-width: 600px) {{ .abc-logo {{ font-size: 3rem; }} }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def banner() -> None:
+    st.markdown(f'<div class="abc-banner" role="alert">⚠️ {PROTOTYPE_WARNING}</div>', unsafe_allow_html=True)
+
+
+def card(msg: str, kind: str = "success", icon: str = "") -> None:
+    st.markdown(f'<div class="abc-card abc-{kind}" role="status">{icon} {msg}</div>', unsafe_allow_html=True)
+
+
+def feedback(msg: str, kind: str, speak_it: bool = True) -> None:
+    """Show a message as a visible caption card AND read it aloud."""
+    icon = {"success": "✅", "warning": "⚠️", "error": "❌"}[kind]
+    card(msg, kind, icon)
+    if speak_it:
+        speak(msg)
+
+
+def step_progress(step: int, total: int = 4) -> None:
+    st.progress(int(step / total * 100), text=f"Step {step} of {total} — {int(step / total * 100)}%")
+
+
+def flash_show() -> None:
+    f = st.session_state.flash
+    if f:
+        feedback(f["msg"], f["kind"])
+        st.session_state.flash = None
+
+
+# --------------------------------------------------------------------------
+# VALIDATION
+# --------------------------------------------------------------------------
+def password_problems(pw: str) -> list:
+    issues = []
+    if len(pw) < 8:
+        issues.append("at least 8 characters")
+    if not re.search(r"[A-Z]", pw):
+        issues.append("one uppercase letter")
+    if not re.search(r"[a-z]", pw):
+        issues.append("one lowercase letter")
+    if not re.search(r"\d", pw):
+        issues.append("one number")
+    if not re.search(r"[^A-Za-z0-9]", pw):
+        issues.append("one special character")
+    return issues
+
+
+# --------------------------------------------------------------------------
+# PAGES — ONBOARDING
+# --------------------------------------------------------------------------
+def page_welcome():
+    st.markdown('<div class="abc-logo" aria-hidden="true">🏦♿</div>', unsafe_allow_html=True)
+    st.title(t("app"))
+    st.write(t("welcome"))
+    read_aloud_button(f"{t('app')}. {t('welcome')}", "ra_welcome")
+    if st.button(t("start"), key="btn_start"):
+        go("language")
+    if st.button(t("login_existing"), key="btn_have_acc"):
+        go("login")
+
+
+def page_language():
+    st.header(t("choose_lang"))
+    speak(t("choose_lang"))
+    for name, code in LANGS.items():
+        if st.button(name, key=f"lang_{code}"):
+            st.session_state.lang_name = name
+            st.session_state.lang_key = code.split("-")[0]
+            go("accessibility")
+    if st.button(t("back"), key="lang_back"):
+        go("welcome")
+
+
+def page_accessibility():
+    st.header(t("access_title"))
+    speak(t("access_title"))
+    choice = st.multiselect("Select all that apply", ACCESS_OPTIONS, default=st.session_state.access)
+    c1, c2 = st.columns(2)
+    if c1.button(t("back"), key="acc_back"):
+        go("language")
+    if c2.button(t("continue"), key="acc_next"):
+        if not choice:
+            feedback("Please choose at least one option, or 'Prefer not to disclose'.", "warning")
+            return
+        st.session_state.access = choice
+        # Customize the interface from the selection
+        if ACCESS_OPTIONS[0] in choice:
+            st.session_state.voice_on = True
+            st.session_state.high_contrast = True
+            st.session_state.font_px = max(st.session_state.font_px, 22)
+        if ACCESS_OPTIONS[4] in choice or ACCESS_OPTIONS[2] in choice:
+            st.session_state.font_px = max(st.session_state.font_px, 24)
+        go("verify")
+
+
+# --------------------------------------------------------------------------
+# PAGES — 4-STEP VERIFICATION (registration)
+# --------------------------------------------------------------------------
+def page_verify():
+    ver, step = st.session_state.ver, st.session_state.ver_step
+    st.header("Four-Step Identity Verification")
+    step_progress(min(step, 4) if step <= 4 else 4)
+
+    if step == 1:
+        st.subheader("Step 1: Fingerprint Registration")
+        st.caption("Simulated biometric registration for the demo.")
+        if st.button("Register Fingerprint", key="fp_reg"):
+            with st.spinner("Scanning fingerprint..."):
+                time.sleep(1.2)
+            ver["fp"] = True
+        if ver["fp"]:
+            feedback("Fingerprint Registered", "success")
+            if st.button(t("continue"), key="fp_next"):
+                st.session_state.ver_step = 2
+                st.rerun()
+
+    elif step == 2:
+        st.subheader("Step 2: Voice Registration")
+        st.info('Please say: "My voice is my secure banking identity."')
+        recorded = None
+        if hasattr(st, "audio_input"):
+            recorded = st.audio_input("Start Recording")
+        c1, c2 = st.columns(2)
+        if c1.button("Save Voice", key="voice_save"):
+            if recorded is not None or st.session_state.get("voice_sim"):
+                with st.spinner("Enrolling voice..."):
+                    time.sleep(1)
+                ver["voice"] = True
+            else:
+                feedback("Please record your voice first, or use the demo option.", "warning")
+        if c2.button("Simulate Recording (demo)", key="voice_sim_btn"):
+            st.session_state.voice_sim = True
+            with st.spinner("Enrolling voice..."):
+                time.sleep(1)
+            ver["voice"] = True
+        if ver["voice"]:
+            feedback("Voice Registered", "success")
+            if st.button(t("continue"), key="voice_next"):
+                st.session_state.ver_step = 3
+                st.rerun()
+
+    elif step == 3:
+        st.subheader("Step 3: Face Registration")
+        st.caption("Align your face inside the frame. Only the image file path is stored.")
+        img = st.camera_input("Capture Face", key=f"cam_{st.session_state.cam_key}")
+        up = st.file_uploader("…or upload an image", type=["png", "jpg", "jpeg"], key="face_up")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("Retake", key="face_retake"):
+            st.session_state.cam_key += 1
+            ver["face"], ver["face_path"] = False, None
+            st.rerun()
+        if c2.button("Simulate Scan (demo)", key="face_sim"):
+            with st.spinner("Scanning face..."):
+                time.sleep(1.2)
+            ver["face"] = True
+        if c3.button("Confirm", key="face_confirm"):
+            src = img or up
+            if src is not None:
+                path = os.path.join(UPLOAD_DIR, f"face_{int(time.time())}.png")
+                with open(path, "wb") as f:
+                    f.write(src.getvalue())
+                ver["face"], ver["face_path"] = True, path
+            elif not ver["face"]:
+                feedback("Please capture or upload a face image first.", "warning")
+        if ver["face"]:
+            feedback("Face Registered", "success")
+            if st.button(t("continue"), key="face_next"):
+                st.session_state.ver_step = 4
+                st.rerun()
+
+    elif step == 4:
+        st.subheader("Step 4: Security Question")
+        q = st.selectbox("Choose one question", SECURITY_QUESTIONS, key="sq_choice")
+        a = st.text_input("Your answer", type="password", key="sq_answer")
+        st.caption("Your answer is hidden and stored securely (hashed).")
+        if st.button("Save Security Question", key="sq_save"):
+            if len(normalize_answer(a)) < 2:
+                feedback("Please enter an answer of at least 2 characters.", "warning")
+            else:
+                ver["question"] = q
+                ver["answer_hash"] = hash_text(normalize_answer(a))
+        if ver["answer_hash"]:
+            card("Fingerprint Registered", "success", "✅")
+            card("Voice Registered", "success", "✅")
+            card("Face Registered", "success", "✅")
+            card("Security Question Added (answer masked: ••••••)", "success", "✅")
+            feedback("Verification Completed Successfully", "success")
+            if st.button("Go to Registration", key="ver_done"):
+                st.session_state.ver_step = 5
+                go("register")
+
+    if step < 5 and st.button(t("back"), key="ver_back"):
+        if step == 1:
+            go("accessibility")
+        st.session_state.ver_step = step - 1
+        st.rerun()
+
+
+# --------------------------------------------------------------------------
+# PAGES — REGISTRATION / LOGIN
+# --------------------------------------------------------------------------
+def page_register():
+    ver = st.session_state.ver
+    if not (ver["fp"] and ver["voice"] and ver["face"] and ver["answer_hash"]):
+        feedback("Please complete the four-step verification first.", "warning")
+        if st.button("Go to Verification", key="reg_to_ver"):
+            st.session_state.ver_step = 1
+            go("verify")
+        return
+
+    st.header("Create Your Account")
+    with st.form("register_form"):
+        fullname = st.text_input("Full Name")
+        dob = st.date_input("Date of Birth", value=dt.date(1960, 1, 1),
+                            min_value=dt.date(1900, 1, 1), max_value=dt.date.today())
+        mobile = st.text_input("Mobile Number")
+        email = st.text_input("Email")
+        st.text_input("Preferred Language", value=st.session_state.lang_name, disabled=True)
+        st.text_area("Accessibility Needs", value=", ".join(st.session_state.access), disabled=True)
+        username = st.text_input("Username")
+        pw = st.text_input("Password", type="password")
+        pw2 = st.text_input("Confirm Password", type="password")
+        submitted = st.form_submit_button("Register")
+
+    if not submitted:
+        return
+
+    errors = []
+    if len(fullname.strip()) < 3:
+        errors.append("Please enter your full name.")
+    if not re.fullmatch(r"[6-9]\d{9}", mobile.strip()):
+        errors.append("Enter a valid 10-digit Indian mobile number.")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()):
+        errors.append("Enter a valid email address.")
+    if not re.fullmatch(r"[A-Za-z0-9_.]{4,20}", username.strip()):
+        errors.append("Username must be 4-20 letters, numbers, dot or underscore.")
+    if (p := password_problems(pw)):
+        errors.append("Password needs: " + ", ".join(p) + ".")
+    if pw != pw2:
+        errors.append("Passwords do not match.")
+    if not errors and get_user(username):
+        errors.append("That username is already taken.")
+
+    if errors:
+        for e in errors:
+            card(e, "error", "❌")
+        speak(errors[0])
+        return
+
+    try:
+        with get_conn() as c:
+            cur = c.execute(
+                """INSERT INTO users (fullname, dob, mobile, email, language, accessibility,
+                                      username, password_hash)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (fullname.strip(), dob.isoformat(), mobile.strip(), email.strip(),
+                 st.session_state.lang_name, ", ".join(st.session_state.access),
+                 username.strip(), hash_text(pw)),
+            )
+            uid = cur.lastrowid
+            c.execute(
+                """INSERT INTO verification (user_id, fingerprint_registered, voice_registered,
+                       face_registered, face_image_path, security_question, security_answer_hash)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (uid, int(ver["fp"]), int(ver["voice"]), int(ver["face"]), ver["face_path"],
+                 ver["question"], ver["answer_hash"]),
+            )
+    except sqlite3.IntegrityError:
+        feedback("That username is already taken.", "error")
+        return
+
+    st.session_state.flash = {"msg": "Registration successful. Please login.", "kind": "success"}
+    go("login")
+
+
+# ---- LOGIN (Stage 1) ----
+def page_login():
+    st.header(t("login"))
+    flash_show()
+
+    with st.form("login_form"):
+        username = st.text_input(t("username"))
+        password = st.text_input(t("password"), type="password")
+        ok = st.form_submit_button(t("login"))
+
+    if ok:
+        handle_login(username.strip(), password)
+
+    if st.button(t("forgot"), key="forgot_btn"):
+        if username.strip():
+            st.session_state.recovery_user = username.strip()
+            go("recovery_kba")
+        else:
+            feedback("Please type your username above first.", "warning")
+    if st.button(t("back"), key="login_back"):
+        go("welcome")
+
+
+def handle_login(username: str, password: str) -> None:
+    if not username or not password:
+        feedback("Please enter both username and password.", "warning")
+        return
+
+    user = get_user(username)
+
+    if user and is_locked(user):
+        feedback(t("locked"), "error")
+        return
+
+    if user and check_hash(password, user["password_hash"]):
+        # SUCCESS: reset failed attempts, log in, go to dashboard
+        set_failed_attempts(user["id"], 0)
+        st.session_state.logged_in = True
+        st.session_state.user_id = user["id"]
+        st.session_state.username = user["username"]
+        st.session_state.anon_fail = 0
+        st.session_state.last_active = time.time()
+        go("dashboard" if user["bank_name"] else "bank")
+        return
+
+    # FAILURE: generic message, never reveal which field was wrong
+    if user:
+        fails = user["failed_attempts"] + 1
+        set_failed_attempts(user["id"], fails)
+    else:
+        st.session_state.anon_fail += 1
+        fails = st.session_state.anon_fail
+
+    remaining = max(0, MAX_LOGIN_ATTEMPTS - fails)
+    msg = t("wrong")
+    feedback(msg, "error")                       # shown as text caption + read aloud
+    st.caption(f"{t('attempts_left')}: {remaining}")
+
+    if fails >= MAX_LOGIN_ATTEMPTS:              # -> Stage 2 automatically
+        st.session_state.recovery_user = username
+        st.session_state.kba_fail = 0
+        time.sleep(1.2)
+        go("recovery_kba")
+
+
+# ---- RECOVERY STAGE 2: Knowledge-Based Authentication ----
+def page_recovery_kba():
+    username = st.session_state.recovery_user
+    if not username:
+        go("login")
+        return
+
+    st.header(t("kba_title"))
+    st.write(t("kba_intro"))
+    step_progress(1, 3)
+
+    user = get_user(username)
+    if user and is_locked(user):
+        feedback(t("locked"), "error")
+        if st.button(t("back"), key="kba_locked_back"):
+            reset_recovery_state()
+            go("login")
+        return
+
+    ver = get_verification(user["id"]) if user else None
+    question = ver["security_question"] if ver and ver["security_question"] else SECURITY_QUESTIONS[2]
+    st.markdown(f"**{question}**")
+    speak(question)
+
+    with st.form("kba_form"):
+        ans = st.text_input(t("kba_answer"), type="password")
+        submit = st.form_submit_button(t("verify_btn"))
+
+    if submit:
+        correct = bool(user and ver and ver["security_answer_hash"]
+                       and check_hash(normalize_answer(ans), ver["security_answer_hash"]))
+        if correct:
+            st.session_state.kba_ok = True
+            st.session_state.re_fp = st.session_state.re_voice = st.session_state.re_face = False
+            go("recovery_reverify")
+        else:
+            st.session_state.kba_fail += 1
+            left = MAX_KBA_ATTEMPTS - st.session_state.kba_fail
+            if left <= 0:
+                if user:
+                    lock_user(user["id"])
+                feedback(t("locked"), "error")
+                reset_recovery_state()
+                time.sleep(1.5)
+                go("login")
+            else:
+                feedback(f"{t('kba_wrong')} {t('attempts_left')}: {left}", "error")
+
+    if st.button(t("back"), key="kba_back"):
+        reset_recovery_state()
+        go("login")
+
+
+# ---- RECOVERY STAGE 3: re-verify via fingerprint / voice / face ----
+def page_recovery_reverify():
+    if not st.session_state.kba_ok:
+        go("login")
+        return
+    st.header(t("reverify_title"))
+    st.write(t("reverify_intro"))
+    done = sum([st.session_state.re_fp, st.session_state.re_voice, st.session_state.re_face])
+    st.progress(int(done / 3 * 100), text=f"{done} of 3 checks complete")
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("👆 Fingerprint", key="re_fp_btn"):
+        with st.spinner("Scanning fingerprint..."):
+            time.sleep(1.2)
+        st.session_state.re_fp = True
+        st.rerun()
+    if c2.button("🎙️ Voice", key="re_voice_btn"):
+        with st.spinner("Verifying voice..."):
+            time.sleep(1.2)
+        st.session_state.re_voice = True
+        st.rerun()
+    if c3.button("🙂 Face", key="re_face_btn"):
+        with st.spinner("Scanning face..."):
+            time.sleep(1.2)
+        st.session_state.re_face = True
+        st.rerun()
+
+    if st.session_state.re_fp:
+        card("Fingerprint verified", "success", "✅")
+    if st.session_state.re_voice:
+        card("Voice verified", "success", "✅")
+    if st.session_state.re_face:
+        card("Face verified", "success", "✅")
+
+    if done == 3:
+        feedback("All checks passed. You may now create a new password.", "success")
+        if st.button(t("continue"), key="re_next"):
+            go("recovery_reset")
+
+    if st.button(t("back"), key="re_back"):
+        reset_recovery_state()
+        go("login")
+
+
+# ---- RECOVERY STAGE 4: new password ----
+def page_recovery_reset():
+    if not (st.session_state.kba_ok and st.session_state.re_fp
+            and st.session_state.re_voice and st.session_state.re_face):
+        go("login")
+        return
+
+    user = get_user(st.session_state.recovery_user or "")
+    if not user:
+        go("login")
+        return
+
+    st.header(t("reset_title"))
+    step_progress(3, 3)
+    st.caption("Use 8+ characters with upper & lower case letters, a number and a special character.")
+
+    with st.form("reset_form"):
+        new_pw = st.text_input(t("new_pw"), type="password")
+        confirm = st.text_input(t("confirm_pw"), type="password")
+        submit = st.form_submit_button(t("reset_btn"))
+
+    if submit:
+        problems = password_problems(new_pw)
+        if problems:
+            feedback("Password needs: " + ", ".join(problems) + ".", "error")
+        elif new_pw != confirm:
+            feedback("Passwords do not match.", "error")
+        elif check_hash(new_pw, user["password_hash"]):
+            feedback("New password must be different from your old password.", "error")
+        else:
+            with get_conn() as c:
+                c.execute(
+                    "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL WHERE id = ?",
+                    (hash_text(new_pw), user["id"]),
+                )
+            reset_recovery_state()
+            st.session_state.anon_fail = 0
+            st.session_state.flash = {"msg": t("reset_ok"), "kind": "success"}
+            go("login")
+
+
+# --------------------------------------------------------------------------
+# PAGES — AFTER LOGIN
+# --------------------------------------------------------------------------
+def require_login() -> bool:
+    if not st.session_state.logged_in:
+        feedback("Please login first.", "warning")
+        if st.button(t("login"), key="need_login"):
+            go("login")
+        return False
+    return True
+
+
+def page_bank():
+    if not require_login():
+        return
+    st.header("Link Your Bank (Simulation)")
+    bank = st.selectbox("Select your bank", BANKS)
+    acc = st.text_input("Account number (use any sample number)", max_chars=18, type="password")
+    if st.button("Link Bank Account", key="link_bank"):
+        if not re.fullmatch(r"\d{9,18}", acc.strip()):
+            feedback("Enter a sample account number with 9 to 18 digits.", "error")
+            return
+        with st.spinner("Linking securely (simulated)..."):
+            time.sleep(1.5)
+        with get_conn() as c:
+            c.execute("UPDATE users SET bank_name = ? WHERE id = ?", (bank, st.session_state.user_id))
+        feedback(f"{bank} linked successfully (simulation).", "success")
+        time.sleep(0.8)
+        go("guardian")
+
+
+def page_guardian():
+    if not require_login():
+        return
+    st.header("Guardian / Trusted Person (Optional)")
+    st.caption("A trusted person can be alerted about suspicious activity.")
+    with st.form("guardian_form"):
+        name = st.text_input("Guardian Name")
+        rel = st.selectbox("Relationship", ["Son", "Daughter", "Spouse", "Sibling", "Friend", "Caretaker", "Other"])
+        contact = st.text_input("Contact Number")
+        save = st.form_submit_button("Save Guardian")
+    if save:
+        if len(name.strip()) < 2 or not re.fullmatch(r"[6-9]\d{9}", contact.strip()):
+            feedback("Enter a name and a valid 10-digit mobile number.", "error")
+        else:
+            with get_conn() as c:
+                c.execute("DELETE FROM guardian WHERE user_id = ?", (st.session_state.user_id,))
+                c.execute(
+                    "INSERT INTO guardian (user_id, guardian_name, relationship, contact) VALUES (?,?,?,?)",
+                    (st.session_state.user_id, name.strip(), rel, contact.strip()),
+                )
+            feedback("Guardian saved.", "success")
+            go("dashboard")
+    if st.button("Skip for now", key="skip_guardian"):
+        go("dashboard")
+
+
+SAMPLE_TX = pd.DataFrame(
+    [
+        ["2026-10-27", "Electricity Bill (TNEB)", "Debit", 1450.00],
+        ["2026-10-26", "Pension Credit", "Credit", 18500.00],
+        ["2026-10-24", "Grocery Store", "Debit", 2310.50],
+        ["2026-10-22", "Pharmacy", "Debit", 865.25],
+        ["2026-10-20", "Mobile Recharge", "Debit", 299.00],
+    ],
+    columns=["Date", "Description", "Type", "Amount (₹)"],
+)
+SAMPLE_BALANCE = 48250.75
+
+
+def tx_sentences() -> str:
+    parts = [f"{r['Type']} of {r['Amount (₹)']:.0f} rupees for {r['Description']} on {r['Date']}."
+             for _, r in SAMPLE_TX.iterrows()]
+    return " ".join(parts)
+
+
+def page_dashboard():
+    if not require_login():
+        return
+    with get_conn() as c:
+        u = c.execute("SELECT fullname, bank_name FROM users WHERE id = ?",
+                      (st.session_state.user_id,)).fetchone()
+    st.header(f"{t('dashboard')} — {u['fullname']}")
+    st.caption(f"Linked bank: {u['bank_name'] or 'Not linked'}")
+
+    st.markdown(f'<div class="abc-card"><div>{t("balance")}</div>'
+                f'<div class="abc-balance">₹ {SAMPLE_BALANCE:,.2f}</div></div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    if c1.button("🔊 Read Balance", key="read_bal"):
+        speak(f"Your available balance is {SAMPLE_BALANCE:.0f} rupees.", force=True)
+    if c2.button("🔊 Read Transactions", key="read_tx"):
+        speak(tx_sentences(), force=True)
+
+    st.subheader(t("recent"))
+    st.dataframe(SAMPLE_TX, use_container_width=True, hide_index=True)
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("🎙️ Voice Assistant", key="to_va"):
+        go("voice")
+    if c2.button("🛡️ Fraud Center", key="to_fraud"):
+        go("fraud")
+    if c3.button("⚙️ Settings", key="to_settings"):
+        go("settings")
+
+
+# ---- Voice assistant ----
+def interpret(cmd: str):
+    c = cmd.lower().strip()
+    if any(k in c for k in ["balance", "இருப்பு", "बैलेंस", "शेष"]):
+        return f"Your available balance is {SAMPLE_BALANCE:,.0f} rupees.", None
+    if any(k in c for k in ["transaction", "பரிவர்த்தனை", "लेन"]):
+        return tx_sentences(), None
+    if "bill" in c:
+        return "Opening bill payments. This is a prototype, so no real payment will be made.", None
+    if any(k in c for k in ["safety", "tip", "fraud", "பாதுகாப்பு", "सुरक्षा"]):
+        return "Never share your OTP, PIN or password. Your bank will never ask for them.", "fraud"
+    if any(k in c for k in ["dashboard", "home", "முகப்பு", "डैशबोर्ड"]):
+        return "Opening your dashboard.", "dashboard"
+    return "Sorry, I did not understand. Try: Check Balance, Recent Transactions, Open Dashboard or Safety Tips.", None
+
+
+def transcribe(audio_file) -> str | None:
+    if sr is None:
+        return None
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(audio_file) as source:
+            audio = recognizer.record(source)
+        return recognizer.recognize_google(audio, language=LANG_CODE_BY_KEY.get(st.session_state.lang_key, "en-IN"))
+    except Exception:
+        return None
+
+
+def page_voice():
+    if not require_login():
+        return
+    st.header("AI Voice Assistant")
+    st.caption('Try: "Check Balance", "Recent Transactions", "Open Dashboard", "Safety Tips"')
+    heard = None
+
+    if hasattr(st, "audio_input"):
+        rec = st.audio_input("🎙️ Press the microphone and speak")
+        if rec is not None and st.button("Understand my voice", key="va_go"):
+            with st.spinner("Listening..."):
+                heard = transcribe(rec)
+            if heard is None:
+                feedback("Could not understand the audio. Please try again or type below.", "warning")
+
+    typed = st.text_input("Or type your command", key="va_text")
+    if st.button("Send", key="va_send") and typed.strip():
+        heard = typed.strip()
+
+    if heard:
+        reply, nav = interpret(heard)
+        st.session_state.assistant_log.append((heard, reply))
+        speak(reply)
+        if nav:
+            time.sleep(0.5)
+            go(nav)
+
+    for q, a in reversed(st.session_state.assistant_log[-5:]):
+        st.markdown(f'<div class="abc-card"><b>You:</b> {q}<br><b>Assistant:</b> {a}</div>',
+                    unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("Balance", key="fb_bal"):
+        reply, _ = interpret("balance"); st.session_state.assistant_log.append(("Balance", reply)); speak(reply); st.rerun()
+    if c2.button("Transactions", key="fb_tx"):
+        reply, _ = interpret("transaction"); st.session_state.assistant_log.append(("Transactions", reply)); speak(reply); st.rerun()
+    if c3.button("Safety", key="fb_safe"):
+        go("fraud")
+    if c4.button("Home", key="fb_home"):
+        go("dashboard")
+
+
+# ---- Fraud awareness ----
+FRAUD_TOPICS = {
+    "OTP Scams": ("Callers pretend to be bank staff and ask for the OTP you just received.",
+                  ["Hang up and call your bank's official number", "Treat every OTP as a secret"],
+                  ["Never read out an OTP to anyone", "Never click links sent with an OTP"]),
+    "UPI Scams": ("Fraudsters send a 'collect request' and say you will receive money.",
+                  ["Enter your UPI PIN only to PAY, never to receive", "Check the name before approving"],
+                  ["Do not approve unknown collect requests", "Do not scan QR codes to 'receive' money"]),
+    "Phishing Attacks": ("Fake SMS, emails or websites copy your bank to steal passwords.",
+                         ["Type the bank's address yourself", "Check for a padlock and the correct spelling"],
+                         ["Do not click links in unexpected messages", "Do not install apps from strangers"]),
+    "Fake Bank Calls": ("Someone claims your account will be blocked unless you act now.",
+                        ["Verify caller identity by calling the bank back", "Ask a family member or guardian"],
+                        ["Do not share card number, PIN or password", "Do not allow remote-access apps"]),
+}
+
+
+def page_fraud():
+    st.header("Fraud Awareness Center")
+    for title, kind, msg in [
+        ("Never share OTP", "error", "❌"),
+        ("Never share Banking PIN", "error", "❌"),
+        ("Never share Password", "error", "❌"),
+        ("Verify caller identity", "success", "✅"),
+        ("Verify official bank sources and review transactions regularly", "success", "✅"),
+    ]:
+        card(title, kind, msg)
+    read_aloud_button("Never share your OTP. Never share your banking PIN. Never share your password. "
+                      "Always verify the caller identity and review your transactions regularly.", "ra_fraud")
+
+    st.subheader("Scam Example Cards")
+    for name, (desc, do, dont) in FRAUD_TOPICS.items():
+        with st.expander(name):
+            st.write(desc)
+            for d in do:
+                st.markdown(f"✅ **Do:** {d}")
+            for d in dont:
+                st.markdown(f"❌ **Don't:** {d}")
+
+    st.subheader("Security Alerts")
+    card("Sample alert: A 'bank officer' called asking for an OTP. This is a scam.", "warning", "⚠️")
+    st.subheader("Safety Videos")
+    st.info("Safety video section — placeholder for the hackathon demo (add your video links here).")
+
+    if st.session_state.logged_in and st.button("Back to Dashboard", key="fraud_back"):
+        go("dashboard")
+    elif not st.session_state.logged_in and st.button(t("back"), key="fraud_back2"):
+        go("welcome")
+
+
+def page_settings():
+    st.header("Settings & Accessibility Controls")
+    st.session_state.font_px = st.slider("Text size", 16, 34, st.session_state.font_px)
+    st.session_state.high_contrast = st.toggle("High contrast mode", st.session_state.high_contrast)
+    st.session_state.voice_on = st.toggle("Voice guidance (text-to-speech)", st.session_state.voice_on)
+    lang = st.selectbox("Language", list(LANGS), index=list(LANGS).index(st.session_state.lang_name))
+    if lang != st.session_state.lang_name:
+        st.session_state.lang_name = lang
+        st.session_state.lang_key = LANGS[lang].split("-")[0]
+        st.rerun()
+    st.caption(f"Session auto-logs out after {SESSION_TIMEOUT_MIN} minutes of inactivity.")
+    c1, c2 = st.columns(2)
+    if st.session_state.logged_in:
+        if c1.button("Back to Dashboard", key="set_back"):
+            go("dashboard")
+        if c2.button(t("logout"), key="set_logout"):
+            logout()
+    elif c1.button(t("back"), key="set_back2"):
+        go("welcome")
+
+
+# --------------------------------------------------------------------------
+# ROUTER
+# --------------------------------------------------------------------------
+PAGES = {
+    "welcome": page_welcome,
+    "language": page_language,
+    "accessibility": page_accessibility,
+    "verify": page_verify,
+    "register": page_register,
+    "login": page_login,
+    "recovery_kba": page_recovery_kba,
+    "recovery_reverify": page_recovery_reverify,
+    "recovery_reset": page_recovery_reset,
+    "bank": page_bank,
+    "guardian": page_guardian,
+    "dashboard": page_dashboard,
+    "voice": page_voice,
+    "fraud": page_fraud,
+    "settings": page_settings,
+}
+
+SIDEBAR_PAGES = {"Dashboard": "dashboard", "Voice Assistant": "voice",
+                 "Fraud Center": "fraud", "Settings": "settings"}
+
+
+def main() -> None:
+    init_db()
+    init_state()
+    inject_css()
+
+    # Session timeout
+    if st.session_state.logged_in and time.time() - st.session_state.last_active > SESSION_TIMEOUT_MIN * 60:
+        for k in ("logged_in", "user_id", "username"):
+            st.session_state[k] = DEFAULTS[k]
+        st.session_state.flash = {"msg": "Session expired for your safety. Please login again.", "kind": "warning"}
+        st.session_state.page = "login"
+    st.session_state.last_active = time.time()
+
+    banner()
+
+    if st.session_state.logged_in:
+        with st.sidebar:
+            st.markdown(f"**{st.session_state.username}**")
+            for label, pg in SIDEBAR_PAGES.items():
+                if st.button(label, key=f"nav_{pg}"):
+                    go(pg)
+            if st.button(t("logout"), key="nav_logout"):
+                logout()
+
+    PAGES.get(st.session_state.page, page_welcome)()
+
+    st.divider()
+    st.caption("INNOVEX · Dexathon 2026 · " + PROTOTYPE_WARNING)
+
+
+if __name__ == "__main__":
+    main()

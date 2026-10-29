@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block title %}Welcome · Accessible Banking{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">BANKING WITH DIGNITY</p>
+    <h1>Banking that feels <span>clear, calm and accessible.</span></h1>
+    <p class="hero-lede">A learning prototype designed around independence, readability and fraud awareness for older adults and people with disabilities.</p>
+    <div class="button-row"><a class="button primary" href="{{ url_for('register') }}">Get started <span aria-hidden="true">→</span></a><a class="button secondary" href="{{ url_for('login') }}">I already have an account</a></div>
+    <p class="microcopy">Large text · Voice guidance · Trusted-person details · Fraud education</p>
+  </div>
+  <div class="hero-visual" aria-label="Illustration of a person receiving friendly banking support" role="img">
+    <div class="sun"></div><div class="plant plant-one"></div><div class="plant plant-two"></div>
+    <div class="illustration-card"><div class="illustration-top"><span>YOUR MONEY, YOUR CHOICE</span><span class="dot"></span></div><div class="illustration-person"><div class="person-head"></div><div class="person-body"></div><div class="person-arm"></div></div><div class="speech-card"><span class="speech-icon">✓</span><span><strong>You're in control</strong><small>Take your time. Stay safe.</small></span></div></div>
+  </div>
+</section>
+<section class="notice-panel"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Important prototype notice</strong><p>All balances and transactions are fictional sample data. The demo does not connect to banks, verify real biometrics, send alerts, or transfer money.</p></div></section>
+<section class="feature-grid">
+  <article class="feature-card"><span class="feature-icon">Aa</span><h2>Made easier to read</h2><p>Adjust text size, switch to high contrast and use browser voice guidance.</p></article>
+  <article class="feature-card"><span class="feature-icon">♡</span><h2>Support when you need it</h2><p>Store trusted-person details locally in this prototype. No messages are sent.</p></article>
+  <article class="feature-card"><span class="feature-icon">盾</span><h2>Spot scams sooner</h2><p>Learn how to handle suspicious OTP requests, UPI requests and fake bank calls.</p></article>
+</section>
+<section class="bottom-cta"><div><p class="eyebrow">START AT YOUR OWN PACE</p><h2>Simple steps. Clear choices.</h2></div><a class="button primary" href="{{ url_for('register') }}">Create a demo account</a></section>
+{% endblock %}

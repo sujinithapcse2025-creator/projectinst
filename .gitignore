@@ -1,0 +1,6 @@
+ .venv/
+__pycache__/
+*.pyc
+banking_companion.db
+.env
+.pytest_cache/

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Accessible Banking Companion</title>
+  <desc id="desc">A teal shield with a simple bank column symbol and a small accessibility circle.</desc>
+  <rect width="128" height="128" rx="28" fill="#e4f1e9"/>
+  <path d="M64 15 101 30v29c0 25-16 42-37 54C43 101 27 84 27 59V30z" fill="#0d625b"/>
+  <path d="m40 47 24-13 24 13z" fill="#fff"/>
+  <path d="M44 52h40v5H44zM47 60h6v20h-6zM61 60h6v20h-6zM75 60h6v20h-6zM41 83h46v5H41z" fill="#fff"/>
+  <circle cx="89" cy="91" r="16" fill="#f0d8a4" stroke="#0d625b" stroke-width="4"/>
+  <circle cx="89" cy="85" r="3.5" fill="#0d625b"/>
+  <path d="M89 90v10m-7-6h14m-10 6-4 5m7-5 4 5" fill="none" stroke="#0d625b" stroke-width="3" stroke-linecap="round"/>
+</svg>

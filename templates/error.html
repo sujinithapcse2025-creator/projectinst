@@ -1,0 +1,2 @@
+{% extends "base.html" %}{% block title %}{{ code }} · Accessible Banking{% endblock %}
+{% block content %}<section class="form-shell"><div class="form-heading"><p class="eyebrow">LET'S GET YOU BACK</p><h1>{{ code }} — Something needs attention</h1><p>{{ message }}</p></div><a class="button primary" href="{{ url_for('index') }}">Return home</a></section>{% endblock %}
